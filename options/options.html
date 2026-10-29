@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>设置 · 抖音收藏分类助手</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>⚙ 设置 · 抖音收藏分类助手</h1>
+
+    <section>
+      <h2>分类规则</h2>
+      <p class="hint">视频标题或作者名包含任意一个关键词，就会归入该分类。分类按从上到下的顺序匹配，先命中先归类。</p>
+      <div id="ruleList"></div>
+      <div class="row">
+        <button id="btnAddRule" class="ghost">＋ 添加分类</button>
+        <button id="btnResetRules" class="ghost">恢复默认规则</button>
+        <button id="btnSaveRules" class="primary">保存规则并重新分类</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>AI 智能分类（可选）</h2>
+      <p class="hint">规则没命中的视频可以交给 AI 归类。需要任意 OpenAI 兼容接口（如 DeepSeek、智谱、通义及各类中转站）。API Key 仅保存在本机浏览器中。</p>
+      <label class="switch"><input type="checkbox" id="aiEnabled" /> 启用 AI 智能分类</label>
+      <div class="field"><label>接口地址（Base URL，含 /v1）</label><input id="aiBaseUrl" type="text" placeholder="https://api.deepseek.com/v1" /></div>
+      <div class="field"><label>API Key</label><input id="aiKey" type="password" placeholder="sk-…" /></div>
+      <div class="field"><label>模型名称</label><input id="aiModel" type="text" placeholder="deepseek-chat" /></div>
+      <div class="row">
+        <button id="btnPerm" class="ghost">① 授权网络访问</button>
+        <button id="btnTestAI" class="ghost">② 测试连接</button>
+        <button id="btnSaveAI" class="primary">保存 AI 设置</button>
+      </div>
+      <p class="hint" id="aiStatus"></p>
+    </section>
+
+    <section>
+      <h2>数据管理</h2>
+      <div class="row">
+        <button id="btnExport" class="ghost">导出全部数据（JSON 备份）</button>
+        <button id="btnImport" class="ghost">导入备份</button>
+        <input type="file" id="fileImport" accept=".json" style="display:none" />
+        <button id="btnClear" class="danger">清空所有数据</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>使用说明</h2>
+      <ol class="hint">
+        <li>打开 <b>www.douyin.com</b> 并登录，进入「我的主页 → 喜欢」或「收藏」标签页。</li>
+        <li>点页面右下角红色悬浮球 →「一键采集（喜欢 + 收藏）」，会自动滚动加载并抓取，期间请勿切换页面。</li>
+        <li>采集完成后自动打开分类看板：左侧筛选分类，卡片上可手动改分类，右上角可搜索、按规则重分、AI 分类和导出。</li>
+        <li>如果抖音页面改版导致采集不到或字段缺失，可先点采集试一次；失效时更新本插件的选择器即可。</li>
+      </ol>
+    </section>
+
+    <p id="savedTip">✓ 已保存</p>
+  </div>
+
+  <script src="../lib/common.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

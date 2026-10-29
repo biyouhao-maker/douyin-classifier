@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "抖音收藏分类助手",
+  "version": "1.0.0",
+  "description": "自动采集抖音网页版的点赞/收藏视频，按关键词规则或 AI 智能分类，提供分类看板浏览与 CSV/JSON/HTML 导出。",
+  "permissions": ["storage", "unlimitedStorage"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "host_permissions": ["https://www.douyin.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "抖音收藏分类助手"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.douyin.com/*"],
+      "js": ["lib/common.js", "content/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options/options.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>抖音收藏分类看板</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <div id="demoBanner" style="display:none">演示模式：未检测到扩展环境，正在展示示例数据</div>
+
+  <header>
+    <div class="brand"><span class="logo">分</span><h1>抖音收藏分类看板</h1></div>
+    <div class="summary" id="summary"></div>
+    <div class="actions">
+      <input id="search" type="search" placeholder="搜索标题 / 作者…" />
+      <select id="sourceFilter">
+        <option value="all">全部来源</option>
+        <option value="like">点赞</option>
+        <option value="collect">收藏</option>
+      </select>
+      <select id="sort">
+        <option value="time">按采集时间</option>
+        <option value="title">按标题</option>
+      </select>
+      <button id="btnRecalc" class="ghost" title="按分类规则重新匹配（保留手动指定的分类）">按规则重新分类</button>
+      <button id="btnAI" class="ai" title="调用 AI 为未分类视频自动分类（需在设置中配置）">AI 智能分类</button>
+      <button id="btnCsv" class="ghost">导出 CSV</button>
+      <button id="btnJson" class="ghost">导出 JSON</button>
+      <button id="btnHtml" class="ghost">导出 HTML</button>
+      <button id="btnOptions" class="ghost">⚙ 设置</button>
+    </div>
+  </header>
+
+  <main>
+    <aside id="sidebar"></aside>
+    <section id="grid"></section>
+  </main>
+
+  <script src="../lib/common.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>

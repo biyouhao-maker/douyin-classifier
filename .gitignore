@@ -1,0 +1,12 @@
+# 工具生成的本地状态文件
+.mimosa/
+
+# 系统文件
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# 编辑器
+.vscode/
+.idea/
+*.swp

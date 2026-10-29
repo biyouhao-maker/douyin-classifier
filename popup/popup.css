@@ -1,0 +1,36 @@
+body {
+  width: 300px;
+  margin: 0;
+  padding: 14px;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  color: #222;
+  background: #fff;
+}
+header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.logo {
+  width: 38px; height: 38px; border-radius: 10px; flex: none;
+  background: linear-gradient(135deg, #fe2c55, #d6246e);
+  color: #fff; font-size: 19px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+h1 { margin: 0; font-size: 15px; }
+header p { margin: 2px 0 0; color: #888; font-size: 11.5px; }
+.stats { display: flex; gap: 8px; margin-bottom: 12px; }
+.stats div {
+  flex: 1; text-align: center; padding: 8px 0;
+  background: #f7f7f9; border-radius: 10px;
+}
+.stats b { display: block; font-size: 17px; color: #fe2c55; }
+.stats span { font-size: 10.5px; color: #999; }
+button {
+  width: 100%; padding: 9px 0; margin-top: 7px;
+  border: 0; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.primary { background: linear-gradient(135deg, #fe2c55, #d6246e); color: #fff; }
+.ghost { background: #f1f1f4; color: #444; }
+button:hover { filter: brightness(.97); }
+footer {
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid #eee;
+  font-size: 11px; color: #999; line-height: 1.7;
+}

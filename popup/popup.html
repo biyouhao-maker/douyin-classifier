@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <span class="logo">分</span>
+    <div>
+      <h1>抖音收藏分类助手</h1>
+      <p id="pageStatus">检测页面中…</p>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div><b id="statTotal">0</b><span>已采集视频</span></div>
+    <div><b id="statCats">0</b><span>分类数</span></div>
+    <div><b id="statUncat">0</b><span>待分类</span></div>
+  </div>
+
+  <button id="btnPanel" class="primary" style="display:none">在本页打开助手面板</button>
+  <button id="btnDash" class="ghost">打开分类看板</button>
+  <button id="btnOptions" class="ghost">分类规则与设置</button>
+
+  <footer>
+    <b>三步上手：</b>① 打开并登录 douyin.com ② 点页面右下角红色悬浮球 →「一键采集」③ 采集完自动打开分类看板
+  </footer>
+
+  <script src="../lib/common.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+:root { --red: #fe2c55; }
+* { box-sizing: border-box; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+body { margin: 0; background: #f5f6f8; color: #222; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 28px 20px 60px; }
+h1 { font-size: 20px; margin-bottom: 20px; }
+section {
+  background: #fff; border: 1px solid #e8e8ec; border-radius: 14px;
+  padding: 18px 20px; margin-bottom: 18px;
+}
+h2 { margin: 0 0 6px; font-size: 16px; }
+.hint { color: #888; font-size: 12.5px; line-height: 1.7; margin: 6px 0 14px; }
+ol.hint { padding-left: 18px; }
+
+.rule {
+  display: flex; gap: 8px; align-items: center;
+  padding: 8px; border: 1px solid #eee; border-radius: 10px; margin-bottom: 8px; background: #fafafa;
+}
+.rule input[type="color"] {
+  width: 34px; height: 34px; border: 0; padding: 0; background: none; cursor: pointer; flex: none;
+}
+.rule input[type="text"] {
+  padding: 7px 9px; border: 1px solid #e2e2e6; border-radius: 8px; font-size: 12.5px; width: 100%; min-width: 0;
+}
+.rule input.name { width: 110px; flex: none; }
+.rule input.kw { flex: 1 1 0; }
+.rule .rm { border: 0; background: none; color: #ccc; font-size: 16px; cursor: pointer; flex: none; }
+.rule .rm:hover { color: var(--red); }
+
+.row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+button { padding: 9px 14px; border: 0; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
+button.primary { background: linear-gradient(135deg, #fe2c55, #d6246e); color: #fff; }
+button.ghost { background: #f1f1f4; color: #444; }
+button.danger { background: #fdeef1; color: var(--red); }
+button:hover { filter: brightness(.97); }
+
+.switch { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; margin-bottom: 10px; }
+.switch input { width: 16px; height: 16px; }
+.field { margin-bottom: 10px; }
+.field label { display: block; font-size: 12px; color: #777; margin-bottom: 4px; }
+.field input {
+  width: 100%; padding: 9px 11px; border: 1px solid #e2e2e6; border-radius: 9px; font-size: 13px;
+}
+#aiStatus { min-height: 1em; }
+#aiStatus.ok { color: #2f9e44; }
+#aiStatus.err { color: var(--red); }
+
+#savedTip {
+  position: fixed; right: 24px; bottom: 24px;
+  background: #2f9e44; color: #fff; padding: 10px 18px; border-radius: 10px;
+  font-size: 13px; font-weight: 600; opacity: 0; transition: opacity .3s; pointer-events: none;
+}
+#savedTip.show { opacity: 1; }
