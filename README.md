@@ -5,16 +5,28 @@
 
 所有数据只保存在你自己的浏览器里，不上传任何服务器。
 
+> 支持 Chrome / Edge 等 Chromium 内核浏览器；数据本地存储，无需注册任何账号。
+
 ---
 
-## 一、安装（Chrome / Edge 通用，约 1 分钟）
+## 一、安装（约 1 分钟）
 
-1. 打开浏览器的扩展管理页：
+**方式一：下载安装包（推荐普通用户）**
+
+1. 到本仓库的 [**Releases 页面**](https://github.com/biyouhao-maker/douyin-classifier/releases) 下载最新的 `douyin-classifier-vX.X.X.zip`，解压得到 `douyin-classifier` 文件夹。
+
+**方式二：下载源码**
+
+1. 点仓库右上角绿色 **Code** 按钮 → **Download ZIP** 并解压（或 `git clone` 本仓库）。
+
+**然后统一步骤：**
+
+2. 打开浏览器的扩展管理页：
    - Chrome：地址栏输入 `chrome://extensions`
    - Edge：地址栏输入 `edge://extensions`
-2. 打开右上角（Edge 在左侧栏）的 **「开发者模式」** 开关。
-3. 点击 **「加载已解压的扩展程序」**，选择本文件夹 `douyin-classifier`。
-4. （建议）点击浏览器工具栏的拼图图标 🧩，把「抖音收藏分类助手」固定到工具栏。
+3. 打开右上角（Edge 在左侧栏）的 **「开发者模式」** 开关。
+4. 点击 **「加载已解压的扩展程序」**，选择解压出来的 `douyin-classifier` 文件夹。
+5. （建议）点击浏览器工具栏的拼图图标 🧩，把「抖音收藏分类助手」固定到工具栏。
 
 ## 二、使用（三步）
 
@@ -83,3 +95,7 @@ douyin-classifier/
 ├── options/               # 设置页：规则管理 / AI 配置 / 数据管理
 └── icons/                 # 图标
 ```
+
+## 八、开源许可
+
+本项目基于 [MIT License](LICENSE) 开源 —— 你可以自由使用、修改和分享。如果对你有帮助，欢迎点个 ⭐ Star。
