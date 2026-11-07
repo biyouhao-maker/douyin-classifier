@@ -545,7 +545,8 @@
 
   // ---------- UI（Shadow DOM）----------
   const host = document.createElement('div');
-  host.style.cssText = 'position:fixed;z-index:2147483647;right:24px;bottom:88px;all:initial;';
+  // 注意：all:initial 必须写在最前，否则会重置后面的定位声明（此 bug 曾导致悬浮球不可见）
+  host.style.cssText = 'all:initial;position:fixed;z-index:2147483647;right:24px;bottom:88px;';
   (document.body || document.documentElement).appendChild(host);
   const root = host.attachShadow({ mode: 'open' });
 
