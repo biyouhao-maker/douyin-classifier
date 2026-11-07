@@ -33,6 +33,20 @@ async function init() {
   } else {
     $('#statCats').textContent = rules.length || 0;
   }
+  // 上次同步摘要
+  try {
+    const lastLike = await VideoDB.getLastSync('like');
+    const lastCollect = await VideoDB.getLastSync('collect');
+    const parts = [];
+    for (const [name, last] of [['喜欢', lastLike], ['收藏', lastCollect]]) {
+      if (last && last.at) parts.push(`${name} ${fmtTime(last.at).slice(5)}（新增 ${last.added}）`);
+    }
+    document.getElementById('syncSummary').textContent = parts.length
+      ? '上次自动同步：' + parts.join('；')
+      : '尚无自动同步记录 —— 完整采集一次后自动生效';
+  } catch (e) {
+    document.getElementById('syncSummary').textContent = '';
+  }
 
   $('#btnDash').addEventListener('click', () => { chrome.tabs.create({ url: dashUrl() }); });
   $('#btnOptions').addEventListener('click', () => { chrome.tabs.create({ url: optionsUrl() }); });

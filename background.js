@@ -54,6 +54,78 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return true;
     }
 
+    // ---- 自动同步任务（第三阶段）----
+    case 'startSyncJob': {
+      const source = msg.source === 'like' || msg.source === 'collect' ? msg.source : null;
+      if (!source) { sendResponse({ ok: false, error: 'bad source' }); return false; }
+      ensureMigration()
+        .then(() => VideoDB.acquireSyncJob(source, { trigger: msg.trigger === 'manual' ? 'manual' : 'auto' }))
+        .then((res) => sendResponse({ ok: res.acquired, ...res }))
+        .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e).slice(0, 200) }));
+      return true;
+    }
+
+    case 'syncHeartbeat': {
+      const source = msg.source === 'like' || msg.source === 'collect' ? msg.source : null;
+      if (!source) { sendResponse({ ok: false, error: 'bad source' }); return false; }
+      VideoDB.heartbeatSyncJob(source, {
+        collected: Number(msg.collected) || 0,
+        added: Number(msg.added) || 0,
+        existing: Number(msg.existing) || 0,
+        failed: Number(msg.failed) || 0,
+        lastProcessedId: typeof msg.lastProcessedId === 'string' ? msg.lastProcessedId : null,
+        scanRounds: Number(msg.scanRounds) || 0,
+        deepScan: !!msg.deepScan,
+      })
+        .then((job) => sendResponse({ ok: !!job }))
+        .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e).slice(0, 200) }));
+      return true;
+    }
+
+    case 'pauseSyncJob': {
+      const source = msg.source === 'like' || msg.source === 'collect' ? msg.source : null;
+      if (!source) { sendResponse({ ok: false, error: 'bad source' }); return false; }
+      VideoDB.updateSyncJob(source, { status: 'paused' })
+        .then((job) => sendResponse({ ok: !!job }))
+        .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e).slice(0, 200) }));
+      return true;
+    }
+
+    case 'finishSyncJob': {
+      const source = msg.source === 'like' || msg.source === 'collect' ? msg.source : null;
+      if (!source) { sendResponse({ ok: false, error: 'bad source' }); return false; }
+      const status = msg.status === 'error' ? 'error' : 'done';
+      VideoDB.finishSyncJob(source, { status, error: msg.error || null, earlyStop: !!msg.earlyStop })
+        .then((job) => sendResponse({ ok: !!job }))
+        .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e).slice(0, 200) }));
+      return true;
+    }
+
+    case 'getSyncReport': {
+      const sources = ['like', 'collect'];
+      ensureMigration()
+        .then(async () => ({
+          jobs: {
+            like: await VideoDB.getSyncJob('like'),
+            collect: await VideoDB.getSyncJob('collect'),
+          },
+          lastSync: await VideoDB.getLastSync(null),
+        }))
+        .then((report) => sendResponse({ ok: true, report: { jobs: report.jobs, lastSync: report.lastSync, sources } }))
+        .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e).slice(0, 200) }));
+      return true;
+    }
+
+    case 'getKnownIds': {
+      const source = msg.source === 'like' || msg.source === 'collect' ? msg.source : null;
+      if (!source) { sendResponse({ ok: false, error: 'bad source' }); return false; }
+      ensureMigration()
+        .then(() => VideoDB.getKnownIds(source))
+        .then(({ ids, tombstoneIds }) => sendResponse({ ok: true, ids, tombstoneIds }))
+        .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e).slice(0, 200) }));
+      return true;
+    }
+
     default:
       return false;
   }

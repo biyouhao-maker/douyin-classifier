@@ -28,11 +28,24 @@ const env = {
       ...opts,
     });
   },
+  // 两个共享同一底层库的实例（模拟多标签页 / SW 重启后重新打开）
+  createPair(dbName) {
+    const name = dbName || ('pair-' + crypto.randomUUID().slice(0, 13));
+    const f = new IDBFactory();
+    return [
+      globalThis.createVideoDB({ backend: 'idb', indexedDB: f, dbName: name }),
+      globalThis.createVideoDB({ backend: 'idb', indexedDB: f, dbName: name }),
+    ];
+  },
+  IDBFactory,
   classifyVideo: globalThis.classifyVideo,
   DEFAULT_RULES: globalThis.DEFAULT_RULES,
   UNCLASSIFIED_KEY: globalThis.UNCLASSIFIED_KEY,
   buildStaticHTML: globalThis.buildStaticHTML,
   buildCSV: globalThis.buildCSV,
+  patternHasInterleave: globalThis.patternHasInterleave,
+  shouldStopIncremental: globalThis.shouldStopIncremental,
+  SYNC_STATUS: globalThis.SYNC_STATUS,
 };
 
 for (const c of globalThis.DBCases.caseList) {

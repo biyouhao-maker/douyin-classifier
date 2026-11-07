@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "抖音收藏分类助手",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "自动采集抖音网页版的点赞/收藏视频，按关键词规则或 AI 智能分类，提供分类看板浏览与 CSV/JSON/HTML 导出。",
   "permissions": ["storage", "unlimitedStorage"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],

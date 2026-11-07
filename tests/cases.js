@@ -23,6 +23,214 @@
   }
 
   const CASES = [
+    // ---- 第三阶段：同步任务队列 CRUD ----
+    {
+      name: '同步任务 CRUD：字段完整、更新、完成与报告',
+      async fn(env) {
+        const db = env.createCaseDB();
+        const acq = await db.acquireSyncJob('like', { trigger: 'auto' });
+        assertEq(acq.acquired, true, '首次获取任务');
+        const job = acq.job;
+        assertEq(job.id, 'sync:like', '任务 ID 固定键');
+        assertEq(job.source, 'like', '数据来源');
+        assertEq(job.status, 'running', '状态 running');
+        assertEq(job.collected, 0, '已采集数量');
+        assertEq(job.failed, 0, '失败数量');
+        assertEq(job.createdAt > 0 && job.updatedAt > 0 && job.heartbeatAt > 0, true, '时间字段齐全');
+        assertEq(typeof job.lastProcessedId === 'string' || job.lastProcessedId === null, true, 'lastProcessedId 类型');
+        await db.updateSyncJob('like', { collected: 12, added: 3, existing: 9, failed: 1, lastProcessedId: '999', scanRounds: 4 });
+        let j = await db.getSyncJob('like');
+        assertEq(j.collected, 12, '更新已采集');
+        assertEq(j.lastProcessedId, '999', '更新最后处理 id');
+        await db.heartbeatSyncJob('like', { scanRounds: 5 });
+        j = await db.getSyncJob('like');
+        assertEq(j.scanRounds, 5, '心跳更新进度');
+        const fin = await db.finishSyncJob('like', { status: 'done', earlyStop: true });
+        assertEq(fin.status, 'done', '完成状态');
+        assertEq(fin.finishedAt > 0, true, '完成时间');
+        const last = await db.getLastSync('like');
+        assertEq(last.status, 'done', '报告 status');
+        assertEq(last.added, 3, '报告新增');
+        assertEq(last.existing, 9, '报告已存在');
+        assertEq(last.failed, 1, '报告失败');
+        assertEq(last.earlyStop, true, '报告 earlyStop');
+        assertEq(last.at > 0, true, '报告时间');
+      },
+    },
+    // ---- 第三阶段：单来源单任务锁 + 心跳接管 ----
+    {
+      name: '单来源单任务锁：心跳新鲜拒绝、过期接管、paused/error/done 可新建',
+      async fn(env) {
+        const db = env.createCaseDB();
+        const a1 = await db.acquireSyncJob('like', {});
+        assertEq(a1.acquired, true, '第一次获取');
+        const a2 = await db.acquireSyncJob('like', {});
+        assertEq(a2.acquired, false, 'running 中拒绝');
+        assertEq(a2.reason, 'locked', '拒绝原因');
+        // 不同来源互不影响
+        const a3 = await db.acquireSyncJob('collect', {});
+        assertEq(a3.acquired, true, '另一来源不受锁影响');
+        // 心跳过期（模拟 SW 被杀后超过阈值）→ 可接管
+        await db.updateSyncJob('like', { heartbeatAt: Date.now() - env.SYNC_HEARTBEAT_MS - 1000 });
+        const a4 = await db.acquireSyncJob('like', {});
+        assertEq(a4.acquired, true, '心跳过期后接管');
+        assertEq(a4.reason, 'took-over', '接管标记');
+        assertEq(a4.resumed, true, '属于恢复语义');
+        assertEq(a4.job.createdAt === a1.job.createdAt, true, '接管保留原 createdAt');
+        // paused 状态可接管
+        await db.updateSyncJob('like', { status: 'paused', heartbeatAt: Date.now() });
+        const a5 = await db.acquireSyncJob('like', {});
+        assertEq(a5.acquired, true, 'paused 可接管');
+        // done 状态可新建
+        await db.finishSyncJob('like', { status: 'done' });
+        const a6 = await db.acquireSyncJob('like', {});
+        assertEq(a6.acquired, true, 'done 后可新建');
+      },
+    },
+    // ---- 第三阶段：DB v1→v2 升级路径 ----
+    {
+      name: 'DB v1→v2 升级：jobs 仓库增量创建，旧数据完好',
+      async fn(env) {
+        if (!env.IDBFactory) {
+          // 浏览器端无法手动降版本建 v1 库，退化验证 jobs 仓库可用
+          const db = env.createCaseDB();
+          const r = await db.acquireSyncJob('like', {});
+          assertEq(r.acquired, true, 'jobs 仓库可用');
+          return;
+        }
+        const f = new env.IDBFactory();
+        const name = 'upgrade-' + crypto.randomUUID().slice(0, 8);
+        // 手动建 v1 结构并写入一条旧数据
+        await new Promise((resolve, reject) => {
+          const req = f.open(name, 1);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            const videos = db.createObjectStore('videos', { keyPath: 'id' });
+            videos.createIndex('firstSeen', 'firstSeen');
+            videos.createIndex('lastUpdated', 'lastUpdated');
+            videos.createIndex('catKey', 'catKey');
+            videos.createIndex('title', 'title');
+            videos.createIndex('sources', 'sources', { multiEntry: true });
+            db.createObjectStore('tombstones', { keyPath: 'id' });
+            const meta = db.createObjectStore('meta', { keyPath: 'key' });
+            meta.put({ key: 'schemaVersion', value: 1 });
+            videos.add({ id: '111', title: '旧版本数据', author: '', url: 'https://www.douyin.com/video/111', cover: '', postDate: '', sources: ['like'], firstSeen: 1700000000000, lastUpdated: 1700000000000, category: null, categoryBy: null, categoryHistory: [], tags: [], catKey: '__unclassified__' });
+          };
+          req.onsuccess = () => { req.result.close(); resolve(); };
+          req.onerror = () => reject(req.error);
+        });
+        // 用当前实现打开（DB_VERSION=2）：增量升级
+        const db = env.createCaseDB({ indexedDB: f, dbName: name });
+        const c = await db.counts();
+        assertEq(c.total, 1, 'v1 数据完好');
+        const sv = await db.getMeta('schemaVersion');
+        assertEq(sv, 2, 'schemaVersion 升级到 2');
+        const r = await db.acquireSyncJob('like', {});
+        assertEq(r.acquired, true, '升级后 jobs 仓库可用');
+      },
+    },
+    // ---- 第三阶段：SW 重启恢复（双实例共享底层库）----
+    {
+      name: 'SW 重启恢复：双实例接管 running 孤儿任务并续跑完成',
+      async fn(env) {
+        const [a, b] = env.createPair();
+        await a.putVideos([{ id: '20001', title: '已有视频', url: 'u', sources: ['like'], firstSeen: 1700000000000 }]);
+        // 实例 A 开始任务（running，心跳新鲜）
+        const acq = await a.acquireSyncJob('like', { trigger: 'auto' });
+        assertEq(acq.acquired, true, 'A 获取任务');
+        await a.updateSyncJob('like', { collected: 5, lastProcessedId: '20001' });
+        // 模拟 SW 被杀：A 停止心跳（把心跳改为过期）
+        await a.updateSyncJob('like', { heartbeatAt: Date.now() - env.SYNC_HEARTBEAT_MS - 1000 });
+        // 实例 B（重启后的 SW / 另一标签页）接管恢复
+        const bAcq = await b.acquireSyncJob('like', { trigger: 'auto' });
+        assertEq(bAcq.acquired, true, 'B 接管成功');
+        assertEq(bAcq.resumed, true, '标记为恢复');
+        const j = await b.getSyncJob('like');
+        assertEq(j.collected, 5, '恢复时保留进度记录');
+        assertEq(j.lastProcessedId, '20001', '恢复时保留 lastProcessedId');
+        // B 续跑完成 → 报告落库
+        await b.finishSyncJob('like', { status: 'done', earlyStop: false });
+        const last = await b.getLastSync('like');
+        assertEq(last.status, 'done', '恢复后完成报告');
+        // 已有数据未被破坏
+        const c = await b.counts();
+        assertEq(c.total, 1, '库数据完好');
+      },
+    },
+    // ---- 第三阶段：getKnownIds（含墓碑）----
+    {
+      name: 'getKnownIds：按来源返回已入库 id 与墓碑 id',
+      async fn(env) {
+        const db = env.createCaseDB();
+        await db.putVideos([
+          { id: '30001', title: 'a', url: 'u', sources: ['like'], firstSeen: 1 },
+          { id: '30002', title: 'b', url: 'u', sources: ['like'], firstSeen: 2 },
+          { id: '30003', title: 'c', url: 'u', sources: ['collect'], firstSeen: 3 },
+        ]);
+        let k = await db.getKnownIds('like');
+        assertEq(k.ids.length, 2, 'like 已入库 2');
+        assertEq(k.tombstoneIds.length, 0, '无墓碑');
+        await db.deleteVideo('30001');
+        k = await db.getKnownIds('like');
+        assertEq(k.ids.length, 1, '删除后已入库 1');
+        assertEq(k.tombstoneIds.includes('30001'), true, '墓碑单独返回');
+        k = await db.getKnownIds('collect');
+        assertEq(k.ids.length, 1, 'collect 已入库 1');
+      },
+    },
+    // ---- 第三阶段：失败统计不破坏数据 + error 后可重试 ----
+    {
+      name: '失败统计：failed 计数、error 状态，已有数据完好、可重新获取任务',
+      async fn(env) {
+        const db = env.createCaseDB();
+        await db.putVideos([{ id: '40001', title: 'x', url: 'u', sources: ['like'], firstSeen: 1 }]);
+        await db.acquireSyncJob('like', {});
+        await db.updateSyncJob('like', { failed: 7 });
+        await db.finishSyncJob('like', { status: 'error', error: '网络异常' });
+        const j = await db.getSyncJob('like');
+        assertEq(j.status, 'error', '任务 error');
+        assertEq(j.failed, 7, '失败计数保留');
+        const last = await db.getLastSync('like');
+        assertEq(last.status, 'error', '报告记录失败');
+        assertEq(last.error, '网络异常', '报告错误信息');
+        // 已有数据完好
+        assertEq((await db.counts()).total, 1, '库数据不受失败影响');
+        // error 后可重新获取（允许失败后继续）
+        const r = await db.acquireSyncJob('like', {});
+        assertEq(r.acquired, true, 'error 后可重新开始');
+      },
+    },
+    // ---- 第三阶段：多标签页并发写同一视频 ----
+    {
+      name: '多标签页并发：双实例同时写同一视频，来源合并不冲突',
+      async fn(env) {
+        const [a, b] = env.createPair();
+        await Promise.all([
+          a.putVideos([{ id: '50001', title: '并发写', url: 'u', sources: ['like'], firstSeen: 1 }]),
+          b.putVideos([{ id: '50001', title: '并发写', url: 'u', sources: ['collect'], firstSeen: 1 }]),
+        ]);
+        const rec = (await a.allVideos()).find((v) => v.id === '50001');
+        assertEq(rec.sources.includes('like') && rec.sources.includes('collect'), true, '双来源合并');
+        assertEq((await b.counts()).total, 1, '两实例看到同一份数据');
+      },
+    },
+    // ---- 第三阶段：增量停止与异常排序纯函数 ----
+    {
+      name: '增量判定：正常倒序提前停止，异常排序转深扫',
+      async fn(env) {
+        const pi = env.patternHasInterleave;
+        const ss = env.shouldStopIncremental;
+        assertEq(pi(['N', 'N', 'E', 'E']), false, '新→旧 正常倒序');
+        assertEq(pi(['N', 'E', 'E', 'N', 'E']), true, '已存在后又出现新视频 → 异常');
+        assertEq(pi(['E', 'N', 'E']), true, '新视频夹在已存在之间 → 异常');
+        assertEq(pi(['E', 'E', 'E']), false, '全为已存在');
+        assertEq(pi(['N', 'N', 'N']), false, '全新');
+        assertEq(ss(30, false, 30), true, '连续 30 条已存在 → 停止');
+        assertEq(ss(29, false, 30), false, '不足阈值继续');
+        assertEq(ss(100, true, 30), false, 'deepScan 模式不提前停止');
+        assertEq(pi([]), false, '空序列');
+      },
+    },
     // ---- 要求 4-1：新增视频 ----
     {
       name: '新增视频：写入与字段映射',

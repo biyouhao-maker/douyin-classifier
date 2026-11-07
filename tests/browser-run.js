@@ -15,6 +15,17 @@
     UNCLASSIFIED_KEY: globalThis.UNCLASSIFIED_KEY,
     buildStaticHTML: globalThis.buildStaticHTML,
     buildCSV: globalThis.buildCSV,
+    patternHasInterleave: globalThis.patternHasInterleave,
+    shouldStopIncremental: globalThis.shouldStopIncremental,
+    SYNC_STATUS: globalThis.SYNC_STATUS,
+    IDBFactory: null, // 浏览器端无法创建独立 IDBFactory，相关分支自动退化
+    createPair(dbName) {
+      const name = dbName || ('pair-selftest-' + crypto.randomUUID().slice(0, 8));
+      return [
+        globalThis.createVideoDB({ backend: 'idb', dbName: name }),
+        globalThis.createVideoDB({ backend: 'idb', dbName: name }),
+      ];
+    },
   };
   const results = await globalThis.DBCases.runAll(env);
   const box = document.getElementById('results');

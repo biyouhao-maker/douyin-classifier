@@ -67,6 +67,7 @@ function fillAI() {
   $('#aiBaseUrl').value = ai.baseUrl || '';
   $('#aiKey').value = ai.apiKey || '';
   $('#aiModel').value = ai.model || '';
+  $('#autoSyncEnabled').checked = settings.autoSync !== false; // 默认开启
 }
 
 $('#btnPerm').addEventListener('click', async () => {
@@ -109,8 +110,17 @@ $('#btnSaveAI').addEventListener('click', async () => {
     apiKey: $('#aiKey').value.trim(),
     model: $('#aiModel').value.trim() || 'deepseek-chat',
   };
+  settings.autoSync = $('#autoSyncEnabled').checked;
   await DB.set({ settings });
   tip();
+});
+
+// 自动同步开关（改动即时生效）
+$('#autoSyncEnabled').addEventListener('change', async () => {
+  const { settings = {} } = await DB.get('settings');
+  settings.autoSync = $('#autoSyncEnabled').checked;
+  await DB.set({ settings });
+  tip(settings.autoSync ? '✓ 自动同步已开启' : '✓ 自动同步已关闭');
 });
 
 // ---------- 数据管理 ----------
