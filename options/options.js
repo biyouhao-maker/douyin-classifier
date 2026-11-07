@@ -1,4 +1,5 @@
 // options/options.js —— 规则管理、AI 配置、数据管理
+// 视频数据操作全部走 VideoDB（IndexedDB）；规则/AI 配置仍存 chrome.storage。
 const $ = (s) => document.querySelector(s);
 let rules = [];
 
@@ -48,12 +49,17 @@ $('#btnResetRules').addEventListener('click', () => {
 
 $('#btnSaveRules').addEventListener('click', async () => {
   rules = rules.filter((r) => r.name && r.name.trim());
+  // "未分类"是保留字，避免与未分组哨兵冲突
+  const reserved = rules.find((r) => r.name.trim() === UNCLASSIFIED);
+  if (reserved) { alert('分类名"未分类"是保留字，请改用其他名称。'); return; }
   await DB.set({ rules });
-  await classifyAll(true); // 保留手动指定的分类
+  await classifyAll(true); // 保留手动与 AI 指定的分类
   tip('✓ 已保存并重新分类');
 });
 
 // ---------- AI 设置 ----------
+let mem = { settings: {} };
+
 function fillAI() {
   const { settings = {} } = mem;
   const ai = settings.ai || {};
@@ -62,8 +68,6 @@ function fillAI() {
   $('#aiKey').value = ai.apiKey || '';
   $('#aiModel').value = ai.model || '';
 }
-
-let mem = { settings: {} };
 
 $('#btnPerm').addEventListener('click', async () => {
   try {
@@ -111,8 +115,10 @@ $('#btnSaveAI').addEventListener('click', async () => {
 
 // ---------- 数据管理 ----------
 $('#btnExport').addEventListener('click', async () => {
-  const all = await DB.get(null);
-  downloadFile('douyin-classifier-backup.json', JSON.stringify(all, null, 2), 'application/json');
+  // v2 备份：视频数组 + 墓碑 + 元信息 + 规则（不含 AI Key 等敏感设置）
+  const backup = await VideoDB.exportAll();
+  backup.rules = rules;
+  downloadFile('douyin-classifier-backup.json', JSON.stringify(backup, null, 2), 'application/json');
 });
 
 $('#btnImport').addEventListener('click', () => $('#fileImport').click());
@@ -120,14 +126,16 @@ $('#fileImport').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   try {
+    if (file.size > 50 * 1024 * 1024) throw new Error('文件超过 50MB，请确认是否为有效备份');
     const data = JSON.parse(await file.text());
     if (!data || typeof data !== 'object' || !('videos' in data)) throw new Error('文件格式不正确');
-    if (!confirm('导入将合并到现有数据中，继续吗？')) return;
-    if (data.videos) await upsertVideos(Object.values(data.videos));
-    if (Array.isArray(data.rules) && data.rules.length) await DB.set({ rules: data.rules });
-    if (data.settings) await DB.set({ settings: data.settings });
-    await init();
-    tip('✓ 导入完成');
+    if (!confirm('导入将合并到现有数据中（同 id 视频恢复备份中的分类），继续吗？')) return;
+    const res = await VideoDB.importAll(data, { restoreCategories: true });
+    if (Array.isArray(data.rules) && data.rules.length) {
+      await DB.set({ rules: data.rules });
+      await initRules();
+    }
+    tip(`✓ 导入完成：${res.imported} 条${res.invalid ? `（跳过异常 ${res.invalid} 条）` : ''}`);
   } catch (err) {
     alert('导入失败：' + err.message);
   } finally {
@@ -135,19 +143,54 @@ $('#fileImport').addEventListener('change', async (e) => {
   }
 });
 
-$('#btnClear').addEventListener('click', async () => {
-  if (!confirm('确定清空所有已采集的数据吗？此操作不可恢复！')) return;
-  if (!confirm('再次确认：真的要清空吗？建议先导出备份。')) return;
+// 迁移成功后的可选清理：删除 chrome.storage 中的旧版 videos 与库内 backup:v1 数据（手动触发）
+async function refreshLegacySection() {
+  const btn = $('#btnCleanLegacy');
+  const hint = $('#legacyHint');
+  const mig = await VideoDB.getMeta('migration');
+  const hasLegacy = Object.keys(await DB.get('videos')).length > 0;
+  const backupRec = await VideoDB.getMeta('backup:v1');
+  const hasBackup = !!(backupRec && backupRec.data);
+  if (mig && mig.state === 'done' && (hasLegacy || hasBackup)) {
+    btn.style.display = '';
+    hint.textContent = `检测到旧版数据残留（chrome.storage 视频 ${hasLegacy ? '有' : '无'}、迁移备份 ${hasBackup ? '有' : '无'}），确认新数据库工作正常后可清理。`;
+  } else {
+    btn.style.display = 'none';
+    if (mig && mig.state === 'failed') hint.textContent = '上次数据迁移失败：' + (mig.error || '未知原因') + '。旧数据完好，下次启动将自动重试。';
+    else hint.textContent = '';
+  }
+}
+
+$('#btnCleanLegacy').addEventListener('click', async () => {
+  if (!confirm('清理旧版备份数据？新数据库不受影响。建议先导出一份 JSON 备份再清理。')) return;
   await DB.remove('videos');
+  // backup:v1 记录本身保留为占位标记（防止重复迁移判断依赖它），只移除其中的数据体
+  await VideoDB.setMeta('backup:v1', { clearedAt: Date.now() });
+  await refreshLegacySection();
+  tip('✓ 已清理');
+});
+
+$('#btnClear').addEventListener('click', async () => {
+  if (!confirm('确定清空所有已采集的视频数据吗？此操作不可恢复！')) return;
+  if (!confirm('再次确认：真的要清空吗？建议先导出备份。')) return;
+  await VideoDB.clearAll();
+  await DB.remove('videos'); // 顺带清掉可能残留的旧版数据
+  await DB.remove('pendingTask');
+  await refreshLegacySection();
   tip('✓ 已清空');
 });
 
 // ---------- 初始化 ----------
-async function init() {
-  const { rules: saved = null, settings = {} } = await DB.get(['rules', 'settings']);
-  mem = { settings };
+async function initRules() {
+  const { rules: saved = null } = await DB.get('rules');
   rules = saved || JSON.parse(JSON.stringify(DEFAULT_RULES));
   renderRules();
+}
+
+async function init() {
+  await VideoDB.runMigrationIfNeeded();
+  await initRules();
   fillAI();
+  await refreshLegacySection();
 }
 init();

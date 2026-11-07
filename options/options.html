@@ -41,8 +41,10 @@
         <button id="btnExport" class="ghost">导出全部数据（JSON 备份）</button>
         <button id="btnImport" class="ghost">导入备份</button>
         <input type="file" id="fileImport" accept=".json" style="display:none" />
+        <button id="btnCleanLegacy" class="ghost" style="display:none">清理旧版备份数据</button>
         <button id="btnClear" class="danger">清空所有数据</button>
       </div>
+      <p class="hint" id="legacyHint"></p>
     </section>
 
     <section>
@@ -58,6 +60,7 @@
     <p id="savedTip">✓ 已保存</p>
   </div>
 
+  <script src="../lib/db.js"></script>
   <script src="../lib/common.js"></script>
   <script src="options.js"></script>
 </body>

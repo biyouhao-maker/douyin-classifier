@@ -86,16 +86,45 @@ API Key 仅存储在本机浏览器（`chrome.storage.local`），不会发往�
 
 ```
 douyin-classifier/
-├── manifest.json          # 扩展清单 (Manifest V3)
-├── background.js          # 后台：负责打开新标签页
-├── lib/common.js          # 共享：存储层、默认规则、分类与导出逻辑
-├── content/content.js     # 抖音页面内：悬浮球 + 自动滚动采集（Shadow DOM）
+├── manifest.json          # 扩展清单 (Manifest V3, v1.1.0)
+├── background.js          # Service Worker：消息路由 + 扩展 IndexedDB 的采集写入通道
+├── lib/db.js              # IndexedDB 数据层（迁移/分页/墓碑/备份，双实现）
+├── lib/common.js          # 共享门面：chrome.storage(设置/规则)、分类规则、AI 调用、导出
+├── content/content.js     # 抖音页面内：悬浮球 + 自动滚动采集（Shadow DOM，经 SW 写库）
 ├── popup/                 # 工具栏弹窗：统计与快捷入口
-├── dashboard/             # 分类看板
-├── options/               # 设置页：规则管理 / AI 配置 / 数据管理
+├── dashboard/             # 分类看板（分组懒加载、手动改分类、AI 分类、导出）
+├── options/               # 设置页：规则管理 / AI 配置 / 数据管理与迁移清理
+├── tests/                 # Node 测试套件（fake-indexeddb）+ 共享用例
+├── test/test.html         # 浏览器自助测试页（真 IndexedDB、独立测试库）
 └── icons/                 # 图标
 ```
 
-## 八、开源许可
+## 八、数据架构（v1.1.0）
+
+视频数据自 v1.1.0 起存储在扩展自己的 **IndexedDB**（库 `dy-classifier`）：
+
+- **videos**：主键为抖音视频 id；索引 `firstSeen` / `catKey`（分类）/ `sources`（多值，点赞/收藏）/ `title`；每条记录含 `categoryHistory`（分类修改历史，保留人工/AI/规则变更）、`tags`（为 AI 标签预留）。
+- **tombstones**：删除墓碑——被你手动删除的视频不会在下次采集中"复活"。
+- **meta**：`schemaVersion` / `migration`（迁移状态）/ `lastSync`（为自动同步预留）/ `backup:v1`（迁移前旧数据快照）。
+- `chrome.storage.local` 继续保存分类规则、AI 配置和任务状态。
+
+**自动迁移（v1.0 → v1.1）**：首次打开任一扩展页面时自动进行——先在库内写入迁移前备份，再单事务整体导入；任何失败都会整体回滚，旧版 `chrome.storage` 数据**永不自动删除**，迁移成功后可在设置页手动"清理旧版备份数据"。
+
+**备份格式 v2**：`{schema:2, videos:[…], tombstones:[…], meta, rules}`；旧版 v1 格式（videos 为对象）仍可导入。备份不包含 AI API Key。
+
+**并发安全**：所有"读取→合并→写入"均在同一 IndexedDB 事务内完成，采集、看板编辑、规则重算并发互不覆盖。
+
+## 九、开发与测试
+
+扩展本体无需构建，直接"加载已解压的扩展程序"即可；测试依赖 Node：
+
+```bash
+npm install        # 安装 fake-indexeddb（仅测试用）
+npm test           # Node 数据层测试套件（13 项用例）
+```
+
+也可以在扩展内打开 `test/test.html`（Chrome 下加载扩展后访问 `chrome-extension://<id>/test/test.html`），在真实 IndexedDB、独立测试库上运行同一套用例，不影响已采集数据。
+
+## 十、开源许可
 
 本项目基于 [MIT License](LICENSE) 开源 —— 你可以自由使用、修改和分享。如果对你有帮助，欢迎点个 ⭐ Star。

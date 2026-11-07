@@ -1,13 +1,18 @@
 // dashboard/dashboard.js —— 分类看板
+// 数据读取走 VideoDB（IndexedDB / 演示模式内存实现）；改分类与删除落库（含历史与墓碑）；
+// 分组渲染采用懒加载（每组默认渲染 120 条，滚动到底自动追加），外观与原有界面保持一致。
 const $ = (s) => document.querySelector(s);
 
+const GROUP_PAGE = 120; // 每个分类初始渲染条数，滚动自动追加
+
 const state = {
-  videos: {},
+  items: [],
   rules: [],
   activeCat: '__all__',
   search: '',
   source: 'all',
   sort: 'time',
+  rendered: {}, // catKey -> 已渲染条数
 };
 
 function ruleColor(name) {
@@ -22,7 +27,7 @@ function catKeyOf(v) {
 
 function filteredList() {
   const kw = state.search.trim().toLowerCase();
-  let list = Object.values(state.videos);
+  let list = state.items;
   if (state.source !== 'all') list = list.filter((v) => (v.sources || []).includes(state.source));
   if (state.activeCat !== '__all__') list = list.filter((v) => catKeyOf(v) === state.activeCat);
   if (kw) list = list.filter((v) => ((v.title || '') + ' ' + (v.author || '')).toLowerCase().includes(kw));
@@ -38,7 +43,7 @@ function render() {
   // —— 侧栏 ——
   const groups = {};
   for (const name of state.rules.map((r) => r.name)) groups[name] = [];
-  for (const v of Object.values(state.videos)) (groups[catKeyOf(v)] = groups[catKeyOf(v)] || []).push(v);
+  for (const v of state.items) (groups[catKeyOf(v)] = groups[catKeyOf(v)] || []).push(v);
 
   const side = $('#sidebar');
   side.innerHTML = '';
@@ -50,22 +55,24 @@ function render() {
     div.addEventListener('click', () => { state.activeCat = key; render(); });
     side.appendChild(div);
   };
-  mk('__all__', '全部视频', Object.keys(state.videos).length, '#222');
+  mk('__all__', '全部视频', state.items.length, '#222');
   side.appendChild(Object.assign(document.createElement('h4'), { textContent: '分类' }));
   for (const r of state.rules) mk(r.name, r.name, (groups[r.name] || []).length, r.color);
   const un = groups[UNCLASSIFIED] || [];
-  if (un.length || Object.keys(state.videos).length) mk(UNCLASSIFIED, UNCLASSIFIED, un.length, '#adb5bd');
+  if (un.length || state.items.length) mk(UNCLASSIFIED, UNCLASSIFIED, un.length, '#adb5bd');
 
   // —— 汇总 ——
-  const total = Object.keys(state.videos).length;
+  const total = state.items.length;
   const classified = total - un.length;
   $('#summary').innerHTML = total
     ? `共 <b>${total}</b> 条视频 · 已分类 <b>${classified}</b> 条 · 待分类 <b>${un.length}</b> 条 <span class="ai-progress" id="aiProgress"></span>`
     : '还没有数据 —— 打开抖音网页版，点右下角悬浮球开始采集';
 
-  // —— 网格 ——
+  // —— 网格（分组 + 懒加载）——
   const grid = $('#grid');
   grid.innerHTML = '';
+  state.rendered = {};
+  if (groupObserver) groupObserver.disconnect();
   if (!list.length) {
     grid.innerHTML = `<div class="empty">这里空空如也<br>去抖音网页版采集「喜欢」和「收藏」的视频吧</div>`;
     return;
@@ -82,9 +89,53 @@ function render() {
     grid.appendChild(title);
     const vg = document.createElement('div');
     vg.className = 'vgrid';
-    items.forEach((v) => vg.appendChild(renderCard(v)));
+    vg.dataset.cat = cat;
     grid.appendChild(vg);
+    appendGroupItems(cat, items);
   }
+}
+
+function appendGroupItems(cat, items) {
+  const grid = $('#grid');
+  const target = Array.from(grid.querySelectorAll('.vgrid')).find((el) => el.dataset.cat === cat);
+  if (!target) return;
+  const done = state.rendered[cat] || 0;
+  const slice = items.slice(done, done + GROUP_PAGE);
+  for (const v of slice) target.appendChild(renderCard(v));
+  state.rendered[cat] = done + slice.length;
+  const remaining = items.length - state.rendered[cat];
+  Array.from(grid.querySelectorAll('.lazy-note')).forEach((n) => { if (n.dataset.cat === cat) n.remove(); });
+  if (remaining > 0) {
+    // 懒加载哨兵：滚动临近时自动追加下一页，不改变界面结构
+    const sentinel = document.createElement('div');
+    sentinel.className = 'lazy-note';
+    sentinel.dataset.cat = cat;
+    sentinel.textContent = `滚动加载更多（${cat} 还剩 ${remaining} 条）…`;
+    sentinel.style.cssText = 'padding:14px 4px;font-size:12px;color:#aaa;';
+    grid.appendChild(sentinel);
+    groupObserver.observe(sentinel);
+  }
+}
+
+function appendMore(cat) {
+  const list = filteredList().filter((v) => catKeyOf(v) === cat);
+  appendGroupItems(cat, list);
+}
+
+let groupObserver = null;
+if ('IntersectionObserver' in window) {
+  groupObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (e.isIntersecting) {
+        const cat = e.target.dataset.cat;
+        e.target.remove();
+        appendMore(cat);
+      }
+    }
+  }, { rootMargin: '600px' });
+} else {
+  // 兜底：不支持 IntersectionObserver 时直接全量渲染
+  groupObserver = { observe(el) { const cat = el.dataset.cat; el.remove(); appendMore(cat); }, disconnect() {} };
 }
 
 function renderCard(v) {
@@ -126,8 +177,9 @@ function renderCard(v) {
 
   const meta = document.createElement('div');
   meta.className = 'vmeta';
-  meta.innerHTML = `<span class="author"></span><span>${v.postDate || ''}</span>`;
+  meta.innerHTML = `<span class="author"></span><span></span>`;
   meta.querySelector('.author').textContent = v.author ? '@' + v.author : '';
+  meta.lastElementChild.textContent = v.postDate || '';
 
   const foot = document.createElement('div');
   foot.className = 'vfoot';
@@ -140,23 +192,22 @@ function renderCard(v) {
     sel.appendChild(o);
   }
   sel.addEventListener('change', async () => {
-    const { videos } = await DB.get('videos');
-    const t = videos[v.id];
-    if (!t) return;
-    if (sel.value === UNCLASSIFIED) { t.category = null; t.categoryBy = null; }
-    else { t.category = sel.value; t.categoryBy = 'manual'; }
-    await DB.set({ videos });
-    render();
+    const cat = sel.value === UNCLASSIFIED ? null : sel.value;
+    const by = cat ? 'manual' : null;
+    const res = await VideoDB.applyCategories([{ id: v.id, category: cat }], by);
+    if (res.changed) {
+      const item = state.items.find((x) => x.id === v.id);
+      if (item) { item.category = cat; item.categoryBy = by; }
+      render();
+    }
   });
   const del = document.createElement('button');
   del.className = 'del'; del.title = '从库中删除';
   del.textContent = '×';
   del.addEventListener('click', async () => {
-    if (!confirm('确定从库中删除这条视频吗？')) return;
-    const { videos } = await DB.get('videos');
-    delete videos[v.id];
-    await DB.set({ videos });
-    delete state.videos[v.id];
+    if (!confirm('确定从库中删除这条视频吗？删除后重新采集也不会再收录它。')) return;
+    await VideoDB.deleteVideo(v.id);
+    state.items = state.items.filter((x) => x.id !== v.id);
     render();
   });
   foot.appendChild(sel); foot.appendChild(del);
@@ -172,8 +223,10 @@ $('#sourceFilter').addEventListener('change', (e) => { state.source = e.target.v
 $('#sort').addEventListener('change', (e) => { state.sort = e.target.value; render(); });
 
 $('#btnRecalc').addEventListener('click', async () => {
-  await classifyAll(true);
-  await load();
+  const btn = $('#btnRecalc');
+  btn.disabled = true;
+  try { await classifyAll(true); await load(); }
+  finally { btn.disabled = false; }
 });
 
 $('#btnAI').addEventListener('click', async () => {
@@ -190,7 +243,7 @@ $('#btnAI').addEventListener('click', async () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('options/options.html') });
     return;
   }
-  const todo = Object.values(state.videos).filter((v) => !v.category);
+  const todo = state.items.filter((v) => !v.category);
   if (!todo.length) { alert('没有待分类的视频（未分类为 0）。'); return; }
   const btn = $('#btnAI');
   btn.disabled = true;
@@ -198,13 +251,16 @@ $('#btnAI').addEventListener('click', async () => {
   try {
     const result = await aiClassify(todo, { ...ai, categories: state.rules.map((r) => r.name) },
       (done, total) => { const p = prog(); if (p) p.textContent = `AI 分类中… ${done}/${total}`; });
-    const { videos } = await DB.get('videos');
+    const entries = Object.entries(result)
+      .filter(([id, cat]) => cat !== UNCLASSIFIED)
+      .map(([id, cat]) => ({ id, category: cat, categoryBy: 'ai' }));
+    await VideoDB.applyCategoriesForce(entries);
     for (const [id, cat] of Object.entries(result)) {
-      if (videos[id] && cat !== UNCLASSIFIED) { videos[id].category = cat; videos[id].categoryBy = 'ai'; }
+      const item = state.items.find((x) => x.id === id);
+      if (item && cat !== UNCLASSIFIED) { item.category = cat; item.categoryBy = 'ai'; }
     }
-    await DB.set({ videos });
-    await load();
-    alert(`AI 分类完成：成功 ${Object.keys(result).length} / ${todo.length} 条`);
+    render();
+    alert(`AI 分类完成：成功 ${entries.length} / ${todo.length} 条`);
   } catch (e) {
     alert('AI 分类失败：' + e.message);
   } finally {
@@ -213,91 +269,55 @@ $('#btnAI').addEventListener('click', async () => {
   }
 });
 
-$('#btnCsv').addEventListener('click', async () => {
-  const { videos = {} } = await DB.get('videos');
-  downloadFile('douyin-videos.csv', buildCSV(videos), 'text/csv;charset=utf-8');
-});
+$('#btnCsv').addEventListener('click', () => downloadFile('douyin-videos.csv', buildCSV(state.items), 'text/csv;charset=utf-8'));
 $('#btnJson').addEventListener('click', async () => {
-  const { videos = {}, rules = [] } = await DB.get(['videos', 'rules']);
-  downloadFile('douyin-videos.json', JSON.stringify({ exportedAt: new Date().toISOString(), rules, videos }, null, 2), 'application/json');
+  // JSON 导出 = 完整备份（v2 格式：videos 数组 + 墓碑 + 规则；不含 AI Key 等敏感设置）
+  const backup = await VideoDB.exportAll();
+  const { rules = [] } = await DB.get('rules');
+  backup.rules = rules;
+  downloadFile('douyin-videos.json', JSON.stringify(backup, null, 2), 'application/json');
 });
-$('#btnHtml').addEventListener('click', async () => {
-  const { videos = {}, rules = [] } = await DB.get(['videos', 'rules']);
-  downloadFile('douyin-videos.html', buildStaticHTML(videos, rules), 'text/html;charset=utf-8');
-});
+$('#btnHtml').addEventListener('click', () => downloadFile('douyin-videos.html', buildStaticHTML(state.items, state.rules), 'text/html;charset=utf-8'));
 $('#btnOptions').addEventListener('click', () => {
   chrome.tabs.create({ url: chrome.runtime.getURL('options/options.html') });
 });
 
-// —— 静态 HTML 导出（按分类分组的可分享页面）——
-function buildStaticHTML(videos, rules) {
-  const groups = groupVideos(videos, rules);
-  const names = rules.map((r) => r.name).filter((n) => groups[n]);
-  if (groups[UNCLASSIFIED]) names.push(UNCLASSIFIED);
-  const colorOf = (n) => { const r = rules.find((r) => r.name === n); return r ? r.color : '#adb5bd'; };
-  let body = '';
-  for (const n of names) {
-    const items = groups[n];
-    body += `<h2><i style="background:${colorOf(n)}"></i>${n}<small>（${items.length}）</small></h2><div class="g">`;
-    for (const v of items) {
-      const cover = v.cover ? `<img src="${v.cover.replace(/"/g, '&quot;')}" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display='none'">` : '';
-      const badges = (v.sources || []).map((s) => `<span class="${s}">${s === 'like' ? '❤' : '★'}</span>`).join('');
-      body += `<a class="c" href="${v.url}" target="_blank" rel="noopener">${cover}${badges}<p>${(v.title || '(无标题)').replace(/</g, '&lt;')}</p><em>${v.author ? '@' + v.author : ''}</em></a>`;
-    }
-    body += '</div>';
-  }
-  const total = Object.keys(videos).length;
-  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>抖音收藏分类 · ${total} 条</title><style>
-body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;padding:24px;background:#f5f6f8}
-h1{font-size:20px}h2{display:flex;align-items:center;gap:8px;font-size:16px;margin:26px 0 12px}
-h2 i{width:11px;height:11px;border-radius:50%}h2 small{color:#999;font-weight:400}
-.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
-.c{position:relative;display:block;background:#fff;border:1px solid #e8e8ec;border-radius:12px;overflow:hidden;text-decoration:none;color:#222}
-.c img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block}
-.c p{font-size:12.5px;line-height:1.45;margin:8px 10px;max-height:3.6em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.c em{display:block;font-size:11px;color:#999;font-style:normal;margin:0 10px 10px}
-.c span{position:absolute;top:8px;left:8px;padding:1px 6px;border-radius:6px;font-size:11px;color:#fff}
-.c span.like{background:rgba(254,44,85,.85)}.c span.collect{background:rgba(255,180,0,.9)}
-</style></head><body><h1>抖音收藏分类 · 共 ${total} 条</h1>${body}</body></html>`;
-}
-
-// —— 数据加载（含演示模式兜底）——
-const DEMO = {
-  rules: DEFAULT_RULES,
-  videos: Object.fromEntries([
-    ['731', '家常红烧肉的做法，软烂入味超下饭', '厨房日记', 'like', '美食'],
-    ['732', '成都三日游保姆级攻略，人均800', '旅行家小鹿', 'collect', '旅行'],
-    ['733', '为什么飞机窗户是圆的？冷知识', '科普君', 'like', '知识/学习'],
-    ['734', '翻唱《起风了》，一开口就沦陷了', '音乐人阿哲', 'like', '音乐'],
-    ['735', '这部电影结尾封神，解说奉上', '老片复刻', 'collect', '影视/综艺'],
-    ['736', '沙雕室友日常，笑到打鸣', '快乐源泉', 'like', '搞笑/娱乐'],
-    ['737', 'vlog｜独居女孩的一天', '小满生活', 'collect', '生活/日常'],
-    ['738', '新手机开箱测评，优缺点全说', '数码大聪明', 'like', '科技/数码'],
-    ['739', '十分钟居家健身操，暴汗燃脂', '健身教练阿伟', 'like', '健身/运动'],
-    ['740', '我家猫会自己开门了！', '猫咪日常', 'collect', '宠物/动物'],
-    ['741', '秋冬通勤穿搭，显瘦又高级', '穿搭笔记', 'like', '穿搭/美妆'],
-    ['742', '农村小院改造第30天', '田园生活记', 'collect', '三农/田园'],
-    ['743', '关于成长的十句话，共勉', '治愈语录', 'like', '情感/语录'],
-    ['744', '宝藏小众露营地点分享', '户外队长', 'like', null],
-    ['745', '今天也是想退休的一天', '摸鱼日常', 'collect', null],
-  ].map(([id, title, author, src, cat]) => [id, {
-    id, title, author,
-    url: 'https://www.douyin.com/video/' + id,
-    cover: '', postDate: '2025-0' + (1 + (id % 9)) + '-1' + (id % 9),
-    sources: [src], firstSeen: Date.now() - id * 100000,
-    category: cat, categoryBy: cat ? 'rule' : null,
-  }])),
-};
+// —— 演示数据（非扩展环境预览用）——
+const DEMO = [
+  ['731', '家常红烧肉的做法，软烂入味超下饭', '厨房日记', 'like', '美食'],
+  ['732', '成都三日游保姆级攻略，人均800', '旅行家小鹿', 'collect', '旅行'],
+  ['733', '为什么飞机窗户是圆的？冷知识', '科普君', 'like', '知识/学习'],
+  ['734', '翻唱《起风了》，一开口就沦陷了', '音乐人阿哲', 'like', '音乐'],
+  ['735', '这部电影结尾封神，解说奉上', '老片复刻', 'collect', '影视/综艺'],
+  ['736', '沙雕室友日常，笑到打鸣', '快乐源泉', 'like', '搞笑/娱乐'],
+  ['737', 'vlog｜独居女孩的一天', '小满生活', 'collect', '生活/日常'],
+  ['738', '新手机开箱测评，优缺点全说', '数码大聪明', 'like', '科技/数码'],
+  ['739', '十分钟居家健身操，暴汗燃脂', '健身教练阿伟', 'like', '健身/运动'],
+  ['740', '我家猫会自己开门了！', '猫咪日常', 'collect', '宠物/动物'],
+  ['741', '秋冬通勤穿搭，显瘦又高级', '穿搭笔记', 'like', '穿搭/美妆'],
+  ['742', '农村小院改造第30天', '田园生活记', 'collect', '三农/田园'],
+  ['743', '关于成长的十句话，共勉', '治愈语录', 'like', '情感/语录'],
+  ['744', '宝藏小众露营地点分享', '户外队长', 'like', null],
+  ['745', '今天也是想退休的一天', '摸鱼日常', 'collect', null],
+].map(([id, title, author, src, cat]) => ({
+  id, title, author,
+  url: 'https://www.douyin.com/video/' + id,
+  cover: '', postDate: '2025-0' + (1 + (id % 9)) + '-1' + (id % 9),
+  sources: [src], firstSeen: Date.now() - id * 100000,
+  category: cat, categoryBy: cat ? 'rule' : null,
+}));
 
 async function load() {
   if (HAS_CHROME) {
-    const { videos = {}, rules = null } = await DB.get(['videos', 'rules']);
-    state.videos = videos;
+    await VideoDB.runMigrationIfNeeded();
+    state.items = await VideoDB.allVideos();
+    const { rules = null } = await DB.get('rules');
     state.rules = rules || DEFAULT_RULES;
   } else {
     document.getElementById('demoBanner').style.display = '';
-    state.videos = DEMO.videos;
-    state.rules = DEMO.rules;
+    await VideoDB.putVideos(DEMO);
+    state.items = await VideoDB.allVideos();
+    state.rules = DEFAULT_RULES;
   }
   render();
 }

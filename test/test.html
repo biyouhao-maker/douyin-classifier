@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>数据层自检 · douyin-classifier</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f6f8; color: #222; margin: 0; padding: 24px; }
+    h1 { font-size: 18px; }
+    p { color: #666; font-size: 13px; line-height: 1.7; }
+    .case { background: #fff; border: 1px solid #e8e8ec; border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; font-size: 13px; }
+    .ok { color: #2f9e44; } .err { color: #fe2c55; }
+    .err-detail { color: #888; font-size: 12px; margin-top: 4px; }
+    #summary { font-weight: 700; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h1>数据层自检（真 IndexedDB）</h1>
+  <p>本页使用独立测试库（不影响已采集数据），在真实 IndexedDB 上运行与 Node 测试相同的全部用例。仅开发/验证使用。</p>
+  <div id="results"></div>
+  <div id="summary"></div>
+  <script src="../lib/db.js"></script>
+  <script src="../lib/common.js"></script>
+  <script src="../tests/cases.js"></script>
+  <script src="../tests/browser-run.js"></script>
+</body>
+</html>

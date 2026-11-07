@@ -23,12 +23,16 @@ async function init() {
     $('#pageStatus').textContent = '请先打开 www.douyin.com';
   }
 
-  const { videos = {}, rules = [] } = await DB.get(['videos', 'rules']);
-  const list = Object.values(videos);
-  $('#statTotal').textContent = list.length;
-  $('#statCats').textContent = new Set(list.map((v) => v.category).filter(Boolean)).size;
-  $('#statUncat').textContent = list.filter((v) => !v.category).length;
-  if (!list.length) $('#statCats').textContent = rules.length || 0;
+  const counts = await VideoDB.counts();
+  const { rules = [] } = await DB.get('rules');
+  $('#statTotal').textContent = counts.total;
+  $('#statUncat').textContent = counts.unclassified;
+  if (counts.total) {
+    const byCat = await VideoDB.countByCategory();
+    $('#statCats').textContent = Object.keys(byCat).filter((k) => k !== UNCLASSIFIED_KEY).length;
+  } else {
+    $('#statCats').textContent = rules.length || 0;
+  }
 
   $('#btnDash').addEventListener('click', () => { chrome.tabs.create({ url: dashUrl() }); });
   $('#btnOptions').addEventListener('click', () => { chrome.tabs.create({ url: optionsUrl() }); });

@@ -1,4 +1,9 @@
 // content/content.js —— 抖音页面内注入：悬浮球 + 采集面板 + 滚动采集引擎（Shadow DOM 隔离样式）
+//
+// 数据写入：本脚本不直接访问 IndexedDB（content script 的 IndexedDB 属于 douyin.com 源），
+// 采集结果经 chrome.runtime.sendMessage 交给 service worker 写入扩展自己的 IndexedDB。
+// 结束判定（增量采集修复）：以"滚动进度"驱动——只要页面还在长高/还能滚动就继续，
+// 到底且高度不再增长后才结束；不再按"是否采到新视频"判定（否则二次采集永远到不了底部）。
 (() => {
   if (window.__dyClassifierInjected) return;
   window.__dyClassifierInjected = true;
@@ -8,6 +13,9 @@
     like: 'https://www.douyin.com/user/self?showTab=like_record',
     collect: 'https://www.douyin.com/user/self?showTab=favorite_collection',
   };
+  const MAX_ROUNDS = 3000;          // 安全上限：最多滚动轮数
+  const MAX_DURATION = 10 * 60 * 1000; // 安全上限：单次采集最长 10 分钟
+  const SEND_BATCH = 50;            // 攒批阈值
 
   // ---------- 页面识别 ----------
   function currentPageType() {
@@ -28,7 +36,7 @@
     return null;
   }
 
-  // ---------- DOM 提取 ----------
+  // ---------- DOM 提取（先按 id 剪枝，只为新视频提取详情） ----------
   function parseVideoId(href) {
     const m = (href || '').match(/\/video\/(\d+)/);
     return m ? m[1] : null;
@@ -78,33 +86,38 @@
     return m ? m[0] : '';
   }
 
-  function extractVideos() {
+  function extractDetail(id, a) {
+    const card = findCard(a);
+    return {
+      id,
+      title: extractTitle(card, a),
+      cover: extractCover(card),
+      author: extractAuthor(card),
+      postDate: extractPostDate(card),
+      url: 'https://www.douyin.com/video/' + id,
+    };
+  }
+
+  // 扫描页面上所有视频链接，只返回本轮尚未入库的（seen 由调用方维护）
+  function extractNewVideos(seen) {
     const out = [];
-    const seenInPage = new Set();
     for (const a of document.querySelectorAll('a[href*="/video/"]')) {
       const id = parseVideoId(a.getAttribute('href'));
-      if (!id || seenInPage.has(id)) continue;
-      seenInPage.add(id);
-      const card = findCard(a);
-      out.push({
-        id,
-        title: extractTitle(card, a),
-        cover: extractCover(card),
-        author: extractAuthor(card),
-        postDate: extractPostDate(card),
-        url: 'https://www.douyin.com/video/' + id,
-      });
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push(extractDetail(id, a));
     }
     return out;
   }
 
+  // 仅点击列表底部的加载按钮；收紧文本匹配，避免误点简介区的"展开/查看更多"
   function clickMore() {
     const btn = document.querySelector('[data-e2e="click-more-btn"]');
     if (btn) { btn.click(); return; }
     for (const el of document.querySelectorAll('div,button,span,p')) {
       if (el.childElementCount === 0) {
         const t = (el.innerText || '').trim();
-        if (t && t.length <= 10 && /点击查看更多|查看更多/.test(t)) { el.click(); return; }
+        if (t && t.length <= 8 && t.indexOf('点击查看更多') !== -1) { el.click(); return; }
       }
     }
   }
@@ -118,13 +131,66 @@
     return false;
   }
 
+  // ---------- 写库通道（content → SW → 扩展 IndexedDB） ----------
+  let sendBuffer = [];
+  let sending = null;
+
+  function sendMessageP(msg) {
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage(msg, (res) => {
+          void chrome.runtime.lastError; // SW 未就绪等情况由 res.ok 兜底
+          resolve(res || { ok: false, error: 'no response' });
+        });
+      } catch (e) {
+        resolve({ ok: false, error: String(e && e.message || e) });
+      }
+    });
+  }
+
+  function queueUpsert(items) {
+    sendBuffer = sendBuffer.concat(items);
+    if (sendBuffer.length >= SEND_BATCH) return flushUpserts();
+    return Promise.resolve({ added: 0 });
+  }
+
+  async function flushUpserts() {
+    if (sending) await sending.catch(() => {});
+    if (!sendBuffer.length) return { added: 0 };
+    const batch = sendBuffer;
+    sendBuffer = [];
+    sending = sendMessageP({ type: 'upsertVideos', items: batch }).then((res) => {
+      sending = null;
+      return res;
+    });
+    const res = await sending;
+    if (res && res.ok && res.stats) {
+      scan.added += res.stats.added || 0;
+      scan.resurrected = (scan.resurrected || 0) + (res.stats.skippedTombstone || 0);
+    }
+    return res;
+  }
+
+  async function getCountsCached(force) {
+    if (!scan.countsCache || force) {
+      const res = await sendMessageP({ type: 'getCounts' });
+      if (res && res.ok) scan.countsCache = res.counts;
+      else if (!scan.countsCache) scan.countsCache = { total: 0, classified: 0, unclassified: 0 };
+    }
+    return scan.countsCache;
+  }
+
   // ---------- 滚动采集 ----------
-  const scan = { running: false, source: null, found: 0, added: 0, stopFlag: false, auto: false };
+  const scan = {
+    running: false, source: null, found: 0, added: 0, stopFlag: false, auto: false,
+    countsCache: null, resurrected: 0,
+  };
 
   async function runScan(source, opts = {}) {
     if (scan.running) return;
-    Object.assign(scan, { running: true, source, found: 0, added: 0, stopFlag: false, auto: !!opts.auto });
+    Object.assign(scan, { running: true, source, found: 0, added: 0, stopFlag: false, auto: !!opts.auto, resurrected: 0 });
     render();
+    await getCountsCached(true);
 
     const ready = await waitForVideos(20000);
     if (!ready) {
@@ -135,40 +201,50 @@
       return;
     }
 
-    // 已入库的同来源视频视为重复，用于去重统计
+    // 已在本来源入库的 id 视为重复（不重复提取详情，也不重复计数）
     const seen = new Set();
-    const { videos: existing = {} } = await DB.get('videos');
-    for (const [id, v] of Object.entries(existing)) {
-      if ((v.sources || []).includes(source)) seen.add(id);
-    }
+    const t0 = Date.now();
+    let rounds = 0;
+    let noProgressRounds = 0;
+    let lastHeight = document.documentElement.scrollHeight;
 
-    let stall = 0;
-    while (!scan.stopFlag) {
-      const list = extractVideos();
-      let newFound = 0;
-      for (const v of list) {
-        if (!seen.has(v.id)) { seen.add(v.id); newFound++; }
-      }
-      scan.found += newFound;
-      stall = newFound ? 0 : stall + 1;
-
+    while (!scan.stopFlag && rounds < MAX_ROUNDS && Date.now() - t0 < MAX_DURATION) {
+      rounds++;
+      const list = extractNewVideos(seen);
+      scan.found += list.length;
       if (list.length) {
-        const { added } = await upsertVideos(list.map((v) => ({ ...v, sources: [source] })));
-        scan.added += added;
+        await queueUpsert(list.map((v) => ({ ...v, sources: [source] })));
       }
       render();
 
-      if (stall >= 8) break;
+      // 滚动与"查看更多"点击
       clickMore();
-      const before = window.scrollY;
+      const beforeY = window.scrollY;
+      const beforeH = document.documentElement.scrollHeight;
       window.scrollBy(0, 1000);
       await sleep(650);
+
+      const afterH = document.documentElement.scrollHeight;
+      const moved = window.scrollY > beforeY;
+      const grew = afterH > beforeH;
       const doc = document.documentElement;
       const atBottom = window.scrollY + window.innerHeight >= doc.scrollHeight - 4;
-      if (atBottom && !newFound && stall >= 3) break;
-      if (window.scrollY === before && !newFound) stall++;
+
+      // 进度判定：页面变高 / 滚动前进 / 采到新内容，任一都视为有进展
+      if (grew || moved || list.length) {
+        noProgressRounds = 0;
+      } else {
+        noProgressRounds++;
+      }
+      // 到底且页面不再长高：连续若干轮即结束（增量采集也能滚到真正的底部）
+      if (atBottom && !grew && !list.length) {
+        noProgressRounds = Math.max(noProgressRounds, 4);
+      }
+      if (noProgressRounds >= 10) break;
     }
 
+    // 收尾：确保缓冲区全部落库（跳转/关闭前不丢数据）
+    await flushUpserts();
     scan.running = false;
     render();
     if (scan.stopFlag) { toast('已停止采集'); return; }
@@ -186,7 +262,8 @@
       toast('全部采集完成');
       if (pendingTask.openDashboard) openDashboard();
     } else {
-      toast(`采集完成：发现 ${scan.found} 条，新增 ${scan.added} 条`);
+      toast(`采集完成：发现 ${scan.found} 条，新增 ${scan.added} 条` +
+        (scan.resurrected ? `，跳过已删除 ${scan.resurrected} 条` : ''));
     }
   }
 
@@ -224,7 +301,6 @@
       transition: transform .15s;
     }
     .bubble:hover { transform: scale(1.08); }
-    .bubble.hidden { display: none; }
     .panel {
       position: absolute; bottom: 64px; right: 0;
       width: 320px; padding: 16px;
@@ -307,8 +383,7 @@
     const typeText = t === 'like' ? '<span class="ok">✓ 喜欢（点赞）页</span>'
       : t === 'collect' ? '<span class="ok">✓ 收藏页</span>'
       : '<span class="warn">未识别 —— 请打开「我的主页 → 喜欢 / 收藏」标签页</span>';
-    const { videos = {} } = await DB.get('videos');
-    const total = Object.keys(videos).length;
+    const total = scan.countsCache ? scan.countsCache.total : 0;
     statusEl.innerHTML = `当前页面：${typeText}<br>已采集：<b>${total}</b> 条视频`;
 
     btnScan.style.display = scan.running ? 'none' : '';
@@ -319,14 +394,16 @@
     if (scan.running) {
       progressEl.style.display = 'block';
       const srcText = scan.source === 'like' ? '喜欢' : '收藏';
-      progressEl.innerHTML = `正在采集「${srcText}」：发现 <b>${scan.found}</b> 条（新增 ${scan.added}）…<div class="bar"><i style="width:100%"></i></div>`;
+      progressEl.innerHTML = `正在采集「${srcText}」：本轮发现 <b>${scan.found}</b> 条（新增入库 ${scan.added}）…<div class="bar"><i style="width:100%"></i></div>`;
     } else {
       progressEl.style.display = 'none';
     }
   }
 
-  // 定时刷新（SPA 路由变化不触发重载）
+  // 定时刷新页面类型识别（SPA 路由变化不触发重载）。
+  // 注意：这里不读取任何存储（已采总数走本地缓存），避免空闲时每 2s 全量反序列化视频库。
   setInterval(() => { if (!scan.running) render(); }, 2000);
+  getCountsCached(true).then(render);
   render();
 
   // 注入后检查是否有未完成的"一键采集"任务

@@ -1,6 +1,10 @@
 # 工具生成的本地状态文件
 .mimosa/
 
+# Node 测试依赖（扩展本体无需 npm 构建）
+node_modules/
+package-lock.json
+
 # 系统文件
 Thumbs.db
 .DS_Store
